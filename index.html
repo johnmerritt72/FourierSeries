@@ -1,0 +1,1338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fourier Shape Drawing</title>
+<style>
+  :root {
+    color-scheme: dark; /* dark scrollbars and form controls */
+    --bg: #0d0d0e;
+    --panel: #18181b;
+    --text: #e8e6e3;
+    --muted: #8a8780;
+    --accent: #f26b5b;
+    --border: #2a2a2e;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #stage { flex: 1; min-height: 0; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  canvas.panning { cursor: grabbing; }
+  #controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: center;
+    padding: 10px 16px; background: var(--panel); border-top: 1px solid var(--border); }
+  #controls label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  #controls output { color: var(--text); min-width: 3ch; font-variant-numeric: tabular-nums; }
+  button, select { background: #222226; color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 12px; font: inherit; cursor: pointer; }
+  button:hover, select:hover { border-color: #44444a; }
+  button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); width: 160px; }
+  input[type=checkbox] { accent-color: var(--accent); }
+  [hidden] { display: none !important; }
+  #status { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); max-width: calc(100% - 32px);
+    padding: 6px 12px; border-radius: 6px; background: #222226; border: 1px solid var(--border);
+    color: var(--muted); font-size: 13px; pointer-events: none; transition: opacity 0.4s; }
+  #status.error { color: #ff8a7a; border-color: #5a2a26; }
+  #svgHolder { position: fixed; left: -10000px; top: 0; visibility: hidden; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+  dialog[open] { display: flex; flex-direction: column; }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .dlg-head h2 { margin: 0; font-size: 16px; font-weight: 600; }
+  .dlg-formula { padding: 12px 18px; color: var(--muted); border-bottom: 1px solid var(--border);
+    font-family: "Cambria Math", "Times New Roman", serif; font-size: 15px; }
+  .dlg-formula div { margin: 2px 0; }
+  .dlg-body { overflow: auto; padding: 0 18px 14px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500;
+    font-family: system-ui, sans-serif; }
+  td.k { color: var(--accent); text-align: right; }
+  .x { color: #6fc6a8; } .y { color: #e8a33d; }
+
+  /* Help */
+  #helpDlg { width: min(1000px, calc(100vw - 32px)); height: calc(100vh - 64px); }
+  .help-wrap { display: flex; flex: 1; min-height: 0; }
+  .help-nav { flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px;
+    border-right: 1px solid var(--border); }
+  .help-nav a { color: var(--muted); text-decoration: none; padding: 7px 12px; border-radius: 6px; }
+  .help-nav a:hover { color: var(--text); }
+  .help-nav a.active { color: var(--text); background: #222226; box-shadow: inset 2px 0 0 var(--accent); }
+  .help-body { flex: 1; overflow: auto; padding: 4px 32px 48px; line-height: 1.65; font-size: 15px; }
+  .help-body section { max-width: 70ch; }
+  .help-body h2 { font-size: 21px; margin: 30px 0 10px; scroll-margin-top: 16px; }
+  .help-body h3 { font-size: 16px; margin: 22px 0 6px; color: var(--text); }
+  .help-body p, .help-body li { color: #cfccc6; }
+  .help-body a { color: var(--accent); }
+  .help-body .m { font-family: "Cambria Math", "Times New Roman", serif; font-size: 1.08em; white-space: nowrap; }
+  .help-body .note { border-left: 3px solid var(--border); padding: 2px 0 2px 14px; color: var(--muted); }
+  .help-body table { font-family: inherit; font-size: 14px; }
+  .help-body td, .help-body th { white-space: normal; vertical-align: top; padding: 7px 10px; }
+  .help-body td:first-child { white-space: nowrap; color: var(--text); font-weight: 500; }
+  .help-body figure { margin: 16px 0; }
+  .help-body figcaption { color: var(--muted); font-size: 13px; }
+  .help-body svg { width: 100%; height: auto; display: block; }
+  .help-body ol li, .help-body ul li { margin: 4px 0; }
+  @media (max-width: 700px) {
+    .help-wrap { flex-direction: column; }
+    .help-nav { flex: none; flex-direction: row; overflow-x: auto; border-right: none;
+      border-bottom: 1px solid var(--border); padding: 8px; }
+    .help-nav a { white-space: nowrap; }
+    .help-nav a.active { box-shadow: inset 0 -2px 0 var(--accent); }
+    .help-body { padding: 4px 16px 40px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas><div id="status" hidden></div></div>
+<div id="controls">
+  <button id="play">Pause</button>
+  <button id="restart">Restart</button>
+  <button id="singleChain" aria-pressed="false" title="Draw with one chain of circles centred on the shape, instead of separate x and y chains">Single chain</button>
+  <button id="animShape" aria-pressed="false" title="Show the whole approximation and grow N one term at a time">Animate shape</button>
+  <button id="showSeries">Show series</button>
+  <button id="resetView" title="Mouse wheel zooms, middle-button drag pans">Reset view</button>
+  <button id="followTip" aria-pressed="false" title="Keep the pen in the middle of the view (handy when zoomed in)">Follow tip</button>
+  <button id="help">Help</button>
+  <label>Shape
+    <select id="shape">
+      <option value="moore2">Moore curve 4×4</option>
+      <option value="moore3">Moore curve 8×8</option>
+      <option value="moore4" selected>Moore curve 16×16</option>
+      <option value="moore5">Moore curve 32×32</option>
+      <option value="koch">Koch snowflake</option>
+      <option value="star">Star</option>
+      <option value="heart">Heart</option>
+      <option value="square">Square</option>
+    </select>
+  </label>
+  <button id="upload">Upload SVG / image…</button>
+  <input id="file" type="file" accept=".svg,image/svg+xml,image/*" hidden>
+  <span id="uploadOpts" hidden style="display:contents">
+    <label title="Connect separate outlines with thin bridges so one loop can draw them all">
+      <input id="join" type="checkbox" checked> Join pieces</label>
+    <label id="thrLabel" title="Which pixels count as part of the shape">Threshold
+      <input id="thr" type="range" min="1" max="254" value="128"><output id="thrOut">128</output></label>
+  </span>
+  <label>N <input id="nSlider" type="range" min="0" max="127" value="0"><output id="nOut">1</output></label>
+  <label title="Logarithmic: equal slider steps multiply the speed">Speed <input id="speed" type="range" min="0" max="200" step="1" value="200"><output id="speedOut">1.00×</output></label>
+</div>
+<div id="svgHolder"></div>
+
+<dialog id="seriesDlg">
+  <div class="dlg-head">
+    <h2 id="seriesTitle">Fourier series</h2>
+    <button id="closeSeries">Close</button>
+  </div>
+  <div class="dlg-formula" id="seriesFormula"></div>
+  <div class="dlg-body">
+    <table>
+      <thead><tr><th>k</th><th class="x">x(t) term</th><th class="y">y(t) term</th></tr></thead>
+      <tbody id="seriesRows"></tbody>
+    </table>
+  </div>
+</dialog>
+
+<dialog id="helpDlg">
+  <div class="dlg-head">
+    <h2>Help</h2>
+    <button id="closeHelp">Close</button>
+  </div>
+  <div class="help-wrap">
+    <nav class="help-nav" aria-label="Help sections">
+      <a href="#h-what">What is a Fourier series?</a>
+      <a href="#h-shapes">Drawing any shape</a>
+      <a href="#h-how">How the page finds the terms</a>
+      <a href="#h-images">Tracing your images</a>
+      <a href="#h-controls">Controls</a>
+      <a href="#h-refs">Learn more</a>
+    </nav>
+    <div class="help-body" id="helpBody">
+
+<section id="h-what">
+  <h2>What is a Fourier series?</h2>
+  <p>Picture a dot moving around a circle at a steady speed. If you only watch how far left or right
+    it is, it slides back and forth smoothly. That back-and-forth motion is called a
+    <b>cosine wave</b>. If you only watch how high or low it is, you get a <b>sine wave</b>, which is
+    the same wave started a quarter-turn later.</p>
+  <p>Now stick a second, smaller circle on the edge of the first one, and make it spin faster. Then add
+    a third circle on the edge of the second. The dot at the end of this chain moves in a much more
+    complicated way than any single circle could. A <b>Fourier series</b> is simply a list of these
+    circles: how big each one is, how fast it spins, and where it starts.</p>
+  <p>The French mathematician Joseph Fourier (1768–1830) discovered something surprising: if you add up
+    enough of these waves, you can build almost <i>any</i> pattern that repeats, even patterns with
+    sharp corners. The picture below builds a "square wave" (a pattern that jumps between two flat
+    levels) out of smooth sine waves.</p>
+  <figure>
+    <svg id="sqFig" viewBox="0 0 640 190" role="img" aria-label="A square wave approximated by 1, 3 and 10 sine waves"></svg>
+    <figcaption>A square wave (dashed) built from <span class="x">1 wave</span>,
+      <span class="y">3 waves</span> and <span style="color:var(--accent)">10 waves</span>.
+      More waves get closer to the sharp corners.</figcaption>
+  </figure>
+  <p>Each wave in the list is called a <b>term</b>. Term number <span class="m">k</span> spins
+    <span class="m">k</span> times while the first term spins once. So term 1 is the big, slow circle
+    and term 200 is a tiny, fast one. <b>N</b> on this page is the highest term being used.</p>
+</section>
+
+<section id="h-shapes">
+  <h2>How circles can draw any shape</h2>
+  <p>Every point in a drawing has two numbers: <span class="m">x</span> (how far right) and
+    <span class="m">y</span> (how far up). Imagine tracing a closed shape with your finger, from the
+    starting point all the way around and back again. As you go, <span class="m">x</span> goes up and down
+    and ends where it started, and so does <span class="m">y</span>. Both are repeating patterns, and a
+    Fourier series can build any repeating pattern.</p>
+  <p>So the page builds <b>two</b> Fourier series: one for <span class="m x">x</span> and one for
+    <span class="m y">y</span>. That's why you see two chains of circles. The <span class="x">teal chain</span>
+    at the top controls left-right: the dashed line drops straight down from its tip. The
+    <span class="y">orange chain</span> on the left controls up-down: its dashed line goes straight across.
+    Where the two lines meet is the pen.</p>
+  <p>Press <b>Single chain</b> to see the same drawing made by one chain of circles centred on the
+    shape, with the pen right at its tip. This works because each term's x-wave and y-wave can be
+    combined and split into two circles of the same speed spinning in opposite directions (one
+    clockwise, one counter-clockwise). The circles are different, but where the tip goes is exactly
+    the same, so the drawing and the error don't change. The biggest circles are placed first.</p>
+  <p>With only one term, each chain is a single circle and the pen draws a plain oval. Each new term adds
+    a smaller, faster circle that fixes finer details. As <b>N</b> grows, the drawing gets closer and
+    closer to the real shape, and the <b>error</b> number shrinks toward zero. This works for any shape
+    you can draw without lifting your pencil, which mathematicians call a <b>continuous</b> curve.</p>
+  <h3>Why some shapes need more terms</h3>
+  <p>Smooth shapes like the <b>heart</b> look nearly perfect after a few dozen terms. Shapes full of sharp
+    corners, like the <b>Moore curve</b>, need many more. A sharp corner is a sudden change of direction,
+    and only small, fast-spinning circles can change direction quickly. The Moore curve has more than a
+    hundred corners, so even with 255 terms it is still about half a percent off.</p>
+  <p class="note">If a shape had a real gap, where the pen had to jump, the series would always overshoot
+    the jump by about 9%, no matter how many terms you used. This is called the <i>Gibbs phenomenon</i>.
+    This page avoids it by always turning your shape into one connected loop.</p>
+</section>
+
+<section id="h-how">
+  <h2>How this page finds the terms</h2>
+  <h3>Step 1: Turn the shape into a loop of points</h3>
+  <p>Built-in shapes are lists of corner points connected by straight lines. For an SVG file, the page asks
+    the browser for about 6,000 evenly spaced points along its paths. For a picture, it traces the
+    outline (see <a href="#h-images" data-jump>Tracing your images</a>).</p>
+  <h3>Step 2: Walk around the loop at a steady speed</h3>
+  <p>The page uses a "clock" called <span class="m">t</span> that goes from 0 to one full turn. In math,
+    one full turn is <span class="m">2π</span>, about 6.28. As <span class="m">t</span> ticks forward, the
+    pen walks around the loop at a steady speed, so at every moment we know <span class="m">x(t)</span> and
+    <span class="m">y(t)</span>.</p>
+  <h3>Step 3: Measure how much of each wave is inside</h3>
+  <p>To find out how much of the wave <span class="m">cos 3t</span> is hiding in <span class="m">x(t)</span>,
+    multiply the two together at every moment and take the average:</p>
+  <ul>
+    <li>If <span class="m">x(t)</span> rises and falls in step with the wave, the products are mostly
+      positive, so the average is big.</li>
+    <li>If they don't match, the positive and negative products cancel out, so the average is close to zero.</li>
+  </ul>
+  <p>Double that average and you have the number in front of <span class="m">cos 3t</span>. The same trick
+    with <span class="m">sin 3t</span> gives the other number. Repeat for every term, for both
+    <span class="m">x</span> and <span class="m">y</span>. The plain average of <span class="m">x(t)</span>
+    is the center of the shape, which is the first number in each formula in <b>Show series</b>.</p>
+  <h3>A shortcut: only the corners matter</h3>
+  <p>Every shape on this page is made of straight line pieces. Along a straight piece, the pen moves in the
+    same direction at the same speed, so nothing interesting happens there. Everything interesting happens
+    at the <b>corners</b>, where the direction changes.</p>
+  <p>Using some calculus, the "multiply and average" step can be rewritten as a sum over the corners. Each
+    corner adds (how much the pen's speed changes at that corner) × (where the wave is at that moment), and
+    the total is divided by <span class="m">k²</span>. So instead of averaging thousands of moments, the page
+    adds up one number per corner, and the answer is exact, not an estimate.</p>
+  <p>The <span class="m">k²</span> also explains why the circles shrink so fast: term 10 is roughly
+    100 times smaller than term 1.</p>
+  <h3>Step 4: Turn each pair of numbers into a circle</h3>
+  <p>Each term has two numbers, <span class="m">a</span> for cosine and <span class="m">b</span> for sine.
+    Together, <span class="m">a cos kt + b sin kt</span> is exactly one circle. Its radius comes from the
+    Pythagorean theorem, <span class="m">r = √(a² + b²)</span>, and <span class="m">a</span> and
+    <span class="m">b</span> also set its starting angle. These are the circles you see spinning.</p>
+  <h3>Step 5: Check the result</h3>
+  <p>The page compares the drawing with the real shape at 2,048 moments around the loop. The
+    <b>error</b> is the farthest the drawing ever gets from the real shape, as a percentage of the
+    shape's longer side.</p>
+  <h3>Why are some terms zero?</h3>
+  <p>For the Moore curve, the second half of the loop is the first half turned upside down (rotated 180°).
+    An even-numbered wave (<span class="m">k</span> = 2, 4, 6, …) looks exactly the same in the second half
+    of the loop as in the first, but the shape is upside-down there, so the two halves cancel out to
+    exactly zero. The page notices this and skips the even terms. The square and the Koch snowflake have
+    the same kind of symmetry.</p>
+</section>
+
+<section id="h-images">
+  <h2>Tracing your images</h2>
+  <p>When you upload a picture (PNG, JPG and so on), the page finds the outline in a few steps:</p>
+  <ol>
+    <li><b>Shrink</b> the picture so its longer side is at most 320 pixels. That's plenty of detail
+      and keeps things fast.</li>
+    <li><b>Decide which pixels are the shape.</b> If the picture has a transparent background, anything
+      that isn't see-through counts. Otherwise, pixels darker than the <b>threshold</b> count. The starting
+      threshold is chosen with <i>Otsu's method</i>, which picks the brightness that best splits the
+      picture into a dark group and a light group. If the picture's edges end up counted as "shape", the
+      page assumes it's a light drawing on a dark background and flips the choice.</li>
+    <li><b>Follow the edges.</b> The page walks along the border between shape pixels and background
+      pixels until it gets back to where it started. That gives one closed outline. It repeats this for
+      every outline, including holes such as the middle of an "O".</li>
+    <li><b>Smooth</b> the stair-step edges by averaging each point with its neighbors.</li>
+    <li><b>Join the pieces.</b> One chain of circles can only draw one loop, so the page connects each
+      separate outline to the nearest point of the drawing so far with a thin "bridge" that the pen
+      travels out and back along. Tiny specks are ignored.</li>
+    <li><b>Space the points evenly</b> (1,024 of them) and find 255 terms for each of
+      <span class="m">x</span> and <span class="m">y</span>.</li>
+  </ol>
+  <p class="note">Tracing works best on clean pictures: logos, icons, silhouettes and simple drawings.
+    Photos usually have too many shades to give a useful outline. SVG files skip tracing entirely and are
+    usually the best choice.</p>
+</section>
+
+<section id="h-controls">
+  <h2>Controls</h2>
+  <table>
+    <tbody>
+      <tr><td>Pause / Play</td><td>Stops or restarts the animation. You can also press <b>Space</b> or
+        left-click anywhere in the drawing.</td></tr>
+      <tr><td>Restart</td><td>Goes back to N = 1 and starts over.</td></tr>
+      <tr><td>Single chain</td><td>Switches between two separate chains (teal for x, orange for y) and one
+        chain of circles centred on the shape that draws with its tip. The drawing is the same either way.</td></tr>
+      <tr><td>Animate shape</td><td>Switches to a second mode. Instead of the pen tracing one loop for each
+        N, you see the finished drawing for each N, with one term added at a time, so you can watch the shape
+        sharpen. The circles are hidden in this mode. Click again to go back.</td></tr>
+      <tr><td>Show series</td><td>Pauses and lists every term in use right now: its number
+        <span class="m">k</span> and its cosine and sine numbers for <span class="m x">x</span> and
+        <span class="m y">y</span>.</td></tr>
+      <tr><td>Reset view</td><td>Undoes any zooming and panning.</td></tr>
+      <tr><td>Help</td><td>Opens this page. The animation pauses while it's open.</td></tr>
+      <tr><td>Shape</td><td>Picks a built-in shape: the Moore curve in four sizes, Koch snowflake, star,
+        heart or square. Your upload appears here too.</td></tr>
+      <tr><td>Upload SVG / image…</td><td>Loads your own shape from an SVG file or a picture.</td></tr>
+      <tr><td>Join pieces</td><td>(Uploads only.) When on, separate outlines are connected with thin bridges
+        so they're all drawn. When off, only the largest outline is drawn.</td></tr>
+      <tr><td>Threshold</td><td>(Pictures only.) Sets which pixels count as part of the shape. Move it if
+        the outline is missing parts or picks up background.</td></tr>
+      <tr><td>N slider</td><td>Chooses how many terms to use. Moving it stops N from growing on its own;
+        press Restart to turn that back on.</td></tr>
+      <tr><td>Speed</td><td>From 0.01× to 1×. Each step of the slider multiplies the speed by the same amount,
+        so the slow end is easy to set. In Animate shape mode it controls how fast terms are added.</td></tr>
+      <tr><td>Mouse wheel</td><td>Zooms in and out around the mouse pointer. Zoom in on the end of a chain
+        to see the tiniest circles. The animation slows down as you zoom in (at 10× zoom it runs 10 times
+        slower) so the tiny circles move at a speed you can follow.</td></tr>
+      <tr><td>Middle-button drag</td><td>Moves (pans) the view around. This turns off Follow tip.</td></tr>
+      <tr><td>Follow tip</td><td>Keeps the pen in the middle of the screen as it moves, so it stays in view
+        when you're zoomed in a lot. Zooming then always zooms in on the pen.</td></tr>
+      <tr><td>N = … &nbsp;/&nbsp; error = …</td><td>How many terms are in use, and how far the drawing is
+        from the real shape at its worst point, as a percentage of the shape's size.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="h-refs">
+  <h2>Learn more</h2>
+  <ul>
+    <li><a href="https://www.youtube.com/watch?v=r6sGWTCMz2k" target="_blank" rel="noopener">But what is a Fourier series? (3Blue1Brown)</a>:
+      a beautifully animated video about drawing with circles. The best place to start.</li>
+    <li><a href="https://www.jezzamon.com/fourier/" target="_blank" rel="noopener">An Interactive Introduction to Fourier Transforms</a>:
+      a hands-on page where you can draw your own shapes and sounds.</li>
+    <li><a href="https://betterexplained.com/articles/an-interactive-guide-to-the-fourier-transform/" target="_blank" rel="noopener">An Interactive Guide to the Fourier Transform (BetterExplained)</a>:
+      explains the "multiply and average" idea with everyday examples.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Fourier_series" target="_blank" rel="noopener">Fourier series (Wikipedia)</a>:
+      the full math, including the formulas for the terms.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Joseph_Fourier" target="_blank" rel="noopener">Joseph Fourier (Wikipedia)</a>:
+      the mathematician who discovered it while studying how heat spreads.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Deferent_and_epicycle" target="_blank" rel="noopener">Deferent and epicycle (Wikipedia)</a>:
+      ancient astronomers used circles-on-circles to predict where the planets would be.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Gibbs_phenomenon" target="_blank" rel="noopener">Gibbs phenomenon (Wikipedia)</a>:
+      why a series always overshoots a jump.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Moore_curve" target="_blank" rel="noopener">Moore curve (Wikipedia)</a> and
+      <a href="https://en.wikipedia.org/wiki/Koch_snowflake" target="_blank" rel="noopener">Koch snowflake (Wikipedia)</a>:
+      the fractal shapes used here.</li>
+    <li><a href="https://en.wikipedia.org/wiki/Otsu%27s_method" target="_blank" rel="noopener">Otsu's method (Wikipedia)</a>:
+      how the starting threshold for pictures is chosen.</li>
+    <li><a href="https://x.com/matharium/status/2109692067026960411" target="_blank" rel="noopener">The matharium post</a>
+      that inspired this page.</li>
+  </ul>
+</section>
+
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const TAU = Math.PI * 2;
+  const COL = {
+    xArm: '#6fc6a8',   // teal chain: x coordinate
+    yArm: '#e8a33d',   // orange chain: y coordinate
+    target: '#3a2e2c',
+    trail: '#f26b5b',
+    pen: '#ffffff',
+    text: '#e8e6e3',
+    muted: '#8a8780',
+    accent: '#f26b5b',
+    single: '#7cc4e8', // single chain
+  };
+  const SHAPE_SIZE = 15;     // non-grid shapes are scaled so their larger side is this many units
+  const UPLOAD_POINTS = 1024;
+  const UPLOAD_K = 255;
+
+  // ---------- Built-in shapes ----------
+  // A shape is { pts, phase, strokeW, K }: a closed loop of points (the last connects back
+  // to the first), where t = 0 sits on the loop, the target's stroke width in world units,
+  // and the highest harmonic to compute.
+
+  // Runs an L-system string: F = step forward, + / - = turn by `angle` degrees.
+  function turtle(s, angle, dir = 0) {
+    const a = angle * Math.PI / 180;
+    let x = 0, y = 0;
+    const pts = [[0, 0]];
+    for (const c of s) {
+      if (c === '+') dir += a;
+      else if (c === '-') dir -= a;
+      else if (c === 'F') { x += Math.cos(dir); y += Math.sin(dir); pts.push([Math.round(x * 1e9) / 1e9, Math.round(y * 1e9) / 1e9]); }
+    }
+    return pts;
+  }
+
+  function moore(order) {
+    let s = 'LFL+F+LFL';
+    for (let i = 1; i < order; i++)
+      s = s.replace(/[LR]/g, c => (c === 'L' ? '-RF+LFL+FR-' : '+LF-RFR-FL+'));
+    const pts = turtle(s, 90, Math.PI / 2);
+    // t = 0 goes half a step before vertex 0 (the middle of the closing step), which sits
+    // on the curve's mirror line, so x comes out as pure sines and y as pure cosines.
+    return { pts, phase: Math.PI / pts.length, strokeW: 0.55, K: pts.length - 1 };
+  }
+
+  function generic(pts, flipY = false) {
+    return { pts: normalize(pts, flipY), phase: 0, strokeW: 0.3, K: 255 };
+  }
+
+  const BUILTIN = {
+    moore2: () => moore(2),
+    moore3: () => moore(3),
+    moore4: () => moore(4),
+    moore5: () => moore(5),
+    koch: () => {
+      let s = 'F--F--F';
+      for (let i = 0; i < 3; i++) s = s.replace(/F/g, 'F+F--F+F');
+      return generic(turtle(s, 60));
+    },
+    star: () => generic(Array.from({ length: 10 }, (_, i) => {
+      const r = i % 2 ? 0.382 : 1, a = Math.PI / 2 + i * Math.PI / 5;
+      return [r * Math.cos(a), r * Math.sin(a)];
+    })),
+    heart: () => generic(Array.from({ length: 400 }, (_, i) => {
+      const u = TAU * i / 400;
+      return [16 * Math.sin(u) ** 3, 13 * Math.cos(u) - 5 * Math.cos(2 * u) - 2 * Math.cos(3 * u) - Math.cos(4 * u)];
+    })),
+    square: () => generic([[0, 0], [1, 0], [1, 1], [0, 1]]),
+  };
+
+  // ---------- Geometry helpers ----------
+  // Drops repeated points (including a last point equal to the first).
+  function cleanLoop(pts) {
+    const out = [];
+    for (const p of pts) {
+      const q = out[out.length - 1];
+      if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-7) out.push(p);
+    }
+    while (out.length > 1 && Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) <= 1e-7) out.pop();
+    return out;
+  }
+
+  function loopLength(pts) {
+    let L = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      L += Math.hypot(q[0] - p[0], q[1] - p[1]);
+    }
+    return L;
+  }
+
+  // Scales a loop so its larger side is SHAPE_SIZE; flipY turns screen coordinates (y down) into y up.
+  function normalize(pts, flipY) {
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const s = SHAPE_SIZE / Math.max(x1 - x0, y1 - y0, 1e-9);
+    return pts.map(([x, y]) => [(x - x0) * s, flipY ? (y1 - y) * s : (y - y0) * s]);
+  }
+
+  // n points evenly spaced along a closed loop.
+  function resampleLoop(pts, n) {
+    pts = cleanLoop(pts);
+    const M = pts.length;
+    const cum = [0];
+    for (let i = 0; i < M; i++) {
+      const p = pts[i], q = pts[(i + 1) % M];
+      cum.push(cum[i] + Math.hypot(q[0] - p[0], q[1] - p[1]));
+    }
+    const L = cum[M], out = [];
+    let j = 0;
+    for (let i = 0; i < n; i++) {
+      const d = L * i / n;
+      while (cum[j + 1] < d) j++;
+      const p = pts[j], q = pts[(j + 1) % M];
+      const a = (d - cum[j]) / (cum[j + 1] - cum[j] || 1);
+      out.push([p[0] + (q[0] - p[0]) * a, p[1] + (q[1] - p[1]) * a]);
+    }
+    return out;
+  }
+
+  // Combines separate outlines into one loop. With join on, each piece is spliced in at its
+  // closest point to the loop so far, through a thin bridge that is travelled out and back.
+  function joinPieces(pieces, join) {
+    let list = pieces.map(cleanLoop).filter(p => p.length >= 3)
+      .map(p => ({ p, len: loopLength(p) })).sort((a, b) => b.len - a.len);
+    if (!list.length) throw new Error('No outline found.');
+    const total = list.reduce((s, o) => s + o.len, 0);
+    list = list.filter(o => o.len >= 0.01 * total).slice(0, 40);
+    if (!join || list.length === 1) return { loop: list[0].p, used: 1, found: pieces.length };
+    let loop = list[0].p.slice();
+    const rest = list.slice(1).map(o => o.p);
+    while (rest.length) {
+      const ls = Math.max(1, Math.floor(loop.length / 500));
+      let best = { d: Infinity };
+      rest.forEach((pc, pi) => {
+        const ps = Math.max(1, Math.floor(pc.length / 80));
+        for (let i = 0; i < loop.length; i += ls)
+          for (let j = 0; j < pc.length; j += ps) {
+            const d = (loop[i][0] - pc[j][0]) ** 2 + (loop[i][1] - pc[j][1]) ** 2;
+            if (d < best.d) best = { d, i, j, pi };
+          }
+      });
+      const pc = rest.splice(best.pi, 1)[0];
+      const { i, j } = best;
+      loop = [...loop.slice(0, i + 1), ...pc.slice(j), ...pc.slice(0, j + 1), ...loop.slice(i)];
+    }
+    return { loop, used: list.length, found: pieces.length };
+  }
+
+  // ---------- Exact Fourier coefficients of a closed polyline ----------
+  // t runs 0..2π in proportion to distance along the loop. f is piecewise linear in t, so f''
+  // is a sum of deltas at the vertices: c_k = -1/(2π k²) Σ_j Δslope_j e^{-ik t_j}.
+  // Real series: f = mean + Σ r_k cos(kt + φ_k). `phase` moves t = 0 forward along the loop.
+  function realSeries(pts, axis, times, K, phase) {
+    const M = pts.length;
+    const v = j => pts[j % M][axis];
+    const tEnd = j => (j < M ? times[j] : TAU);
+    const slope = new Float64Array(M);
+    let mean = 0;
+    for (let j = 0; j < M; j++) {
+      const dt = tEnd(j + 1) - times[j];
+      slope[j] = (v(j + 1) - v(j)) / dt;
+      mean += (v(j) + v(j + 1)) / 2 * dt;
+    }
+    mean /= TAU;
+    const r = new Float64Array(K + 1), phi = new Float64Array(K + 1);
+    for (let k = 1; k <= K; k++) {
+      let re = 0, im = 0;
+      for (let j = 0; j < M; j++) {
+        const ds = slope[j] - slope[(j - 1 + M) % M];
+        const a = k * times[j];
+        re += ds * Math.cos(a);
+        im -= ds * Math.sin(a);
+      }
+      const s = -1 / (TAU * k * k);
+      re *= s; im *= s;
+      r[k] = 2 * Math.hypot(re, im);
+      phi[k] = Math.atan2(im, re) - k * phase;
+    }
+    return { mean, r, phi };
+  }
+
+  // ---------- State ----------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const ui = {
+    play: $('play'), restart: $('restart'), showSeries: $('showSeries'),
+    shape: $('shape'), upload: $('upload'), file: $('file'),
+    uploadOpts: $('uploadOpts'), join: $('join'), thrLabel: $('thrLabel'), thr: $('thr'), thrOut: $('thrOut'),
+    nSlider: $('nSlider'), nOut: $('nOut'), speed: $('speed'), speedOut: $('speedOut'),
+    status: $('status'),
+  };
+
+  const SAMPLES = 2048;
+  let shape, pts, M, times, sx, sy, step, bounds, size, maxReach;
+  let stages, stageIdx, N, maxN, approx, errorPct;
+  let t = 0, playing = true, speed = 1, auto = true;
+  // 'trace': the pen draws one loop per N, then N jumps to the next stage.
+  // 'shape': the whole approximation is shown and N grows one term at a time.
+  let mode = 'trace', nAcc = 0;
+  // 'xy': separate chains for x and y at the sides. 'single': one chain centred on the shape.
+  let chains = 'xy', singleTerms = [];
+  const SHAPE_TERMS_PER_SEC = 15; // at 1× speed
+  let layout = null;
+  // Zoom and pan of the drawing area, in CSS pixels: screen = pan + zoom · layout position.
+  const view = { zoom: 1, panX: 0, panY: 0 };
+  const resetView = () => { view.zoom = 1; view.panX = 0; view.panY = 0; };
+  let follow = false; // keep the pen centred
+
+  function buildStages(maxN, step) {
+    // Harmonics 1, 1+step, …, growing roughly geometrically once past the first few.
+    const out = [];
+    let n = 1;
+    while (n < maxN) {
+      out.push(n);
+      n += step * Math.max(1, Math.round(n * 0.2 / step));
+    }
+    out.push(maxN);
+    return out;
+  }
+
+  function setShape(s) {
+    shape = s;
+    pts = cleanLoop(s.pts);
+    M = pts.length;
+    times = new Float64Array(M);
+    const L = loopLength(pts);
+    for (let j = 1; j < M; j++)
+      times[j] = times[j - 1] + TAU * Math.hypot(pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1]) / L;
+    sx = realSeries(pts, 0, times, s.K, s.phase);
+    sy = realSeries(pts, 1, times, s.K, s.phase);
+    // Shapes with half-turn symmetry (like the Moore curve) have every even harmonic zero.
+    let maxR = 0, maxEven = 0;
+    for (let k = 1; k <= s.K; k++) {
+      const m = Math.max(sx.r[k], sy.r[k]);
+      maxR = Math.max(maxR, m);
+      if (k % 2 === 0) maxEven = Math.max(maxEven, m);
+    }
+    step = maxEven < 1e-9 * maxR ? 2 : 1;
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    bounds = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    size = Math.max(bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+    // Furthest a chain can swing from its centre: sum of all radii.
+    let rx = 0, ry = 0;
+    for (let k = 1; k <= s.K; k++) { rx += sx.r[k]; ry += sy.r[k]; }
+    maxReach = Math.max(rx, ry);
+    maxN = s.K - ((s.K - 1) % step);
+    stages = buildStages(maxN, step);
+    ui.nSlider.max = stages.length - 1;
+    layout = null;
+    restart();
+  }
+
+  function evalSeries(s, n, tt) {
+    let v = s.mean;
+    for (let k = 1; k <= n; k += step) v += s.r[k] * Math.cos(k * tt + s.phi[k]);
+    return v;
+  }
+
+  // Point on the true loop at parameter t (same t = 0 as the series).
+  function curveAt(tt) {
+    const u = (((tt - shape.phase) % TAU) + TAU) % TAU;
+    let lo = 0, hi = M - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (times[mid] <= u) lo = mid; else hi = mid - 1;
+    }
+    const t1 = lo + 1 < M ? times[lo + 1] : TAU;
+    const a = (u - times[lo]) / (t1 - times[lo]);
+    const p = pts[lo], q = pts[(lo + 1) % M];
+    return [p[0] + (q[0] - p[0]) * a, p[1] + (q[1] - p[1]) * a];
+  }
+
+  function setN(idx) {
+    setNValue(stages[idx]);
+  }
+
+  // Any N, not just a stage; the slider shows the last stage at or below it.
+  function setNValue(n) {
+    N = n;
+    stageIdx = 0;
+    while (stageIdx + 1 < stages.length && stages[stageIdx + 1] <= n) stageIdx++;
+    ui.nSlider.value = stageIdx;
+    ui.nOut.textContent = N;
+    approx = new Float64Array(SAMPLES * 2 + 2);
+    for (let i = 0; i <= SAMPLES; i++) {
+      const tt = TAU * i / SAMPLES;
+      approx[2 * i] = evalSeries(sx, N, tt);
+      approx[2 * i + 1] = evalSeries(sy, N, tt);
+    }
+    // Largest distance between the drawing and the true curve, as a percentage of its size.
+    let worst = 0;
+    for (let i = 0; i < SAMPLES; i++) {
+      const [x, y] = curveAt(TAU * i / SAMPLES);
+      worst = Math.max(worst, Math.hypot(approx[2 * i] - x, approx[2 * i + 1] - y));
+    }
+    errorPct = worst / size * 100;
+
+    // The same series as one chain: x + iy = c₀ + Σ c₊ₖ e^{ikt} + c₋ₖ e^{−ikt}. With
+    // A = (rₓ/2)e^{iφₓ} and B = (r_y/2)e^{iφ_y}: c₊ₖ = A + iB, c₋ₖ = conj(A) + i·conj(B).
+    singleTerms = [];
+    for (let k = 1; k <= N; k += step) {
+      const ar = sx.r[k] / 2 * Math.cos(sx.phi[k]), ai = sx.r[k] / 2 * Math.sin(sx.phi[k]);
+      const br = sy.r[k] / 2 * Math.cos(sy.phi[k]), bi = sy.r[k] / 2 * Math.sin(sy.phi[k]);
+      singleTerms.push({ f: k, re: ar - bi, im: ai + br }, { f: -k, re: ar + bi, im: br - ai });
+    }
+    for (const c of singleTerms) { c.mag = Math.hypot(c.re, c.im); c.arg = Math.atan2(c.im, c.re); }
+    singleTerms.sort((a, b) => b.mag - a.mag); // biggest circles first
+  }
+
+  function restart() {
+    t = 0;
+    nAcc = 0;
+    auto = true;
+    setN(0);
+  }
+
+  // ---------- Layout ----------
+  function computeLayout(W, H) {
+    // World units: curve box is (x1-x0) × (y1-y0); chains need 2·reach each, plus a gap.
+    const pad = 1.2;
+    const cw = bounds.x1 - bounds.x0, ch = bounds.y1 - bounds.y0;
+    const textSize = Math.max(14, Math.min(W, H) * 0.045);
+    if (mode === 'shape' || chains === 'single') {
+      // No side chains: the shape gets the whole area below the labels (with extra room
+      // around it for a single chain's circles).
+      const band = textSize * 3.6;
+      const pad = mode === 'shape' ? 1.2 : 3;
+      const scale = Math.min(W / (cw + 2 * pad), (H - band) / (ch + 2 * pad));
+      const boxLeft = (W - cw * scale) / 2, boxTop = band + (H - band - ch * scale) / 2;
+      return {
+        scale,
+        toX: x => boxLeft + (x - bounds.x0) * scale,
+        toY: y => boxTop + (bounds.y1 - y) * scale,
+        textX: 24, textY: 16, textSize,
+      };
+    }
+    const reach = maxReach;
+    const gap = 1.5;
+    const worldW = 2 * reach + gap + cw + 2 * pad;
+    const worldH = 2 * reach + gap + ch + 2 * pad;
+    const scale = Math.min(W / worldW, H / worldH);
+    const offX = (W - worldW * scale) / 2, offY = (H - worldH * scale) / 2;
+    // Curve box origin (screen) — bottom-right.
+    const boxLeft = offX + (pad + 2 * reach + gap) * scale;
+    const boxTop = offY + (pad + 2 * reach + gap) * scale;
+    const toX = x => boxLeft + (x - bounds.x0) * scale;
+    const toY = y => boxTop + (bounds.y1 - y) * scale; // flip so +y is up
+    return {
+      scale, toX, toY,
+      xChainY: offY + (pad + reach) * scale,      // vertical centre of the x chain
+      yChainX: offX + (pad + reach) * scale,      // horizontal centre of the y chain
+      textX: offX + pad * scale,
+      textY: offY + pad * scale,
+      textSize,
+    };
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = canvas.getBoundingClientRect();
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    layout = null;
+  }
+
+  // ---------- Drawing ----------
+  function drawChain(s, n, tt, start, axis, color) {
+    // axis 'x': phasor (r cos θ, r sin θ) — its x component is the x coordinate.
+    // axis 'y': phasor (r sin θ, -r cos θ) — its screen-y component is the y coordinate.
+    const L = layout, z = view.zoom;
+    let px = start[0], py = start[1];
+    ctx.lineWidth = 1 / z;
+    for (let k = 1; k <= n; k += step) {
+      const rad = s.r[k] * L.scale;
+      const a = k * tt + s.phi[k];
+      const dx = axis === 'x' ? rad * Math.cos(a) : rad * Math.sin(a);
+      const dy = axis === 'x' ? rad * Math.sin(a) : -rad * Math.cos(a);
+      if (rad * z > 0.6) { // skip circles too small to see at this zoom
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = k === 1 ? 0.75 : 0.35;
+        ctx.beginPath(); ctx.arc(px, py, rad, 0, TAU); ctx.stroke();
+      }
+      // Arms are always drawn: hundreds of circles too small to show can still add up to a
+      // visible distance, and the arms keep the chain connected to the pen.
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = '#d8d4cc';
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + dx, py + dy); ctx.stroke();
+      px += dx; py += dy;
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(px, py, 3 / z, 0, TAU); ctx.fill();
+    return [px, py];
+  }
+
+  // One chain of circles starting at the shape's centre; its tip is the pen.
+  function drawSingleChain(tt) {
+    const L = layout, z = view.zoom;
+    let px = L.toX(sx.mean), py = L.toY(sy.mean);
+    ctx.lineWidth = 1 / z;
+    singleTerms.forEach((c, i) => {
+      const rad = c.mag * L.scale;
+      const a = c.arg + c.f * tt;
+      const dx = rad * Math.cos(a), dy = -rad * Math.sin(a); // screen y points down
+      if (rad * z > 0.6) {
+        ctx.strokeStyle = COL.single;
+        ctx.globalAlpha = i === 0 ? 0.75 : 0.4;
+        ctx.beginPath(); ctx.arc(px, py, rad, 0, TAU); ctx.stroke();
+      }
+      // Arms are always drawn: hundreds of circles too small to show can still add up to a
+      // visible distance, and the arms keep the chain connected to the pen.
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = '#d8d4cc';
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + dx, py + dy); ctx.stroke();
+      px += dx; py += dy;
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = COL.pen;
+    ctx.beginPath(); ctx.arc(px, py, 3.5 / z, 0, TAU); ctx.fill();
+  }
+
+  function draw() {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    if (!layout) layout = computeLayout(W, H);
+    const L = layout;
+    ctx.fillStyle = '#0d0d0e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Everything except the labels lives in the zoomable view. Line widths and dot sizes are
+    // divided by the zoom so they stay thin on screen while the geometry grows.
+    const z = view.zoom;
+    if (follow && mode !== 'shape') {
+      // Centre the pen: screen = pan + zoom · position.
+      view.panX = W / 2 - z * L.toX(evalSeries(sx, N, t));
+      view.panY = H / 2 - z * L.toY(evalSeries(sy, N, t));
+    }
+    ctx.save();
+    ctx.translate(view.panX, view.panY);
+    ctx.scale(z, z);
+
+    // Target curve: thick muted outline.
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = COL.target;
+    // Scales with the shape, but never thinner than 4px or wider than 28px on screen.
+    ctx.lineWidth = Math.min(28 / z, Math.max(4 / z, L.scale * shape.strokeW));
+    ctx.beginPath();
+    for (let j = 0; j <= M; j++) {
+      const p = pts[j % M];
+      j ? ctx.lineTo(L.toX(p[0]), L.toY(p[1])) : ctx.moveTo(L.toX(p[0]), L.toY(p[1]));
+    }
+    ctx.stroke();
+
+    // Full approximation for the current N: faint while tracing, bright in shape mode.
+    const shapeMode = mode === 'shape';
+    ctx.strokeStyle = COL.trail;
+    ctx.globalAlpha = shapeMode ? 1 : 0.18;
+    ctx.lineWidth = (shapeMode ? 1.8 : 1.2) / z;
+    ctx.beginPath();
+    for (let i = 0; i <= SAMPLES; i++) {
+      const X = L.toX(approx[2 * i]), Y = L.toY(approx[2 * i + 1]);
+      i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+    }
+    ctx.stroke();
+
+    // Trail traced so far this revolution.
+    // The stored samples are too coarse up close, so the last stretch before the pen is
+    // recomputed finely every frame (more finely the further you zoom in).
+    if (!shapeMode) {
+      const FINE = z > 2 ? 6 : 1; // how many stored samples the fine stretch replaces
+      const upto = Math.floor((t / TAU) * SAMPLES);
+      const coarseEnd = Math.max(0, upto - FINE);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1.8 / z;
+      ctx.beginPath();
+      for (let i = 0; i <= coarseEnd; i++) {
+        const X = L.toX(approx[2 * i]), Y = L.toY(approx[2 * i + 1]);
+        i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+      }
+      const t0 = TAU * coarseEnd / SAMPLES, steps = z > 2 ? 240 : 4;
+      for (let j = 1; j <= steps; j++) {
+        const tt = t0 + (t - t0) * j / steps;
+        ctx.lineTo(L.toX(evalSeries(sx, N, tt)), L.toY(evalSeries(sy, N, tt)));
+      }
+      ctx.stroke();
+    }
+
+    // Epicycle chains, guides and pen — tracing mode only; shape mode shows just the curve.
+    if (!shapeMode && chains === 'single') {
+      drawSingleChain(t);
+    } else if (!shapeMode) {
+      const xTip = drawChain(sx, N, t, [L.toX(sx.mean), L.xChainY], 'x', COL.xArm);
+      const yTip = drawChain(sy, N, t, [L.yChainX, L.toY(sy.mean)], 'y', COL.yArm);
+      const pen = [xTip[0], yTip[1]];
+
+      // Dashed guides from each chain tip to the pen.
+      ctx.setLineDash([5 / z, 5 / z]);
+      ctx.lineWidth = 1 / z;
+      ctx.strokeStyle = COL.muted;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(xTip[0], xTip[1]); ctx.lineTo(pen[0], pen[1]);
+      ctx.moveTo(yTip[0], yTip[1]); ctx.lineTo(pen[0], pen[1]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = COL.pen;
+      ctx.beginPath(); ctx.arc(pen[0], pen[1], 3.5 / z, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+
+    // Labels (fixed on screen).
+    const fs = L.textSize;
+    ctx.textBaseline = 'top';
+    ctx.font = `italic ${fs * 1.25}px "Cambria Math", "Times New Roman", serif`;
+    ctx.fillStyle = COL.text;
+    const lab = 'N = ';
+    ctx.fillText(lab, L.textX, L.textY);
+    const w = ctx.measureText(lab).width;
+    ctx.fillStyle = COL.accent;
+    ctx.font = `${fs * 1.25}px "Cambria Math", "Times New Roman", serif`;
+    ctx.fillText(String(N), L.textX + w, L.textY);
+    ctx.fillStyle = COL.text;
+    ctx.font = `${fs}px "Cambria Math", "Times New Roman", serif`;
+    ctx.fillText(`error = ${errorPct.toFixed(2)}%`, L.textX, L.textY + fs * 1.7);
+    if (z !== 1) {
+      ctx.font = `${Math.max(12, fs * 0.6)}px system-ui, sans-serif`;
+      ctx.fillStyle = COL.muted;
+      const zs = z < 10 ? z.toFixed(1) : Math.round(z);
+      ctx.fillText(z > 1 ? `zoom ${zs}× · speed ÷${(zoomSlowdown()).toFixed(z < 10 ? 1 : 0)}` : `zoom ${zs}×`,
+        L.textX, L.textY + fs * 3.1);
+    }
+  }
+
+  // Zooming in slows the motion so small circles stay easy to follow. Exponent 1 means
+  // "proportional": 10× zoom runs 10× slower. Lower it (e.g. 0.7) if that feels too slow.
+  const ZOOM_SLOWDOWN_POWER = 1;
+  const zoomSlowdown = () => Math.max(1, view.zoom) ** ZOOM_SLOWDOWN_POWER;
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (playing) {
+      // Early stages spin quickly; later ones slow down so the detail is visible.
+      const revSeconds = 1.1 + 1.4 * (stageIdx / Math.max(1, stages.length - 1));
+      t += dt * speed * TAU / revSeconds / zoomSlowdown();
+      if (t >= TAU) {
+        t -= TAU;
+        if (mode === 'trace' && auto && stageIdx < stages.length - 1) setN(stageIdx + 1);
+      }
+      if (mode === 'shape' && auto && N < maxN) {
+        nAcc += dt * speed * SHAPE_TERMS_PER_SEC;
+        if (nAcc >= 1) {
+          const terms = Math.floor(nAcc);
+          nAcc -= terms;
+          setNValue(Math.min(maxN, N + terms * step)); // next nonzero term(s)
+        }
+      }
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Uploads ----------
+  let upload = null; // { kind: 'svg', name, text } or { kind: 'raster', name, data, w, h, useAlpha }
+  let statusTimer = 0;
+
+  function setStatus(msg, isError = false) {
+    ui.status.textContent = msg;
+    ui.status.classList.toggle('error', isError);
+    ui.status.hidden = false;
+    ui.status.style.opacity = 1;
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => { ui.status.style.opacity = 0; }, isError ? 7000 : 4000);
+  }
+
+  // Samples every drawable element of an SVG into polylines, splitting where a path jumps
+  // (a move-to adds no length, so consecutive samples land far apart).
+  function svgPieces(text) {
+    const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const root = doc.documentElement;
+    if (doc.querySelector('parsererror') || root.nodeName.toLowerCase() !== 'svg')
+      throw new Error('Could not read that SVG file.');
+    const holder = $('svgHolder');
+    holder.replaceChildren(document.importNode(root, true));
+    const svg = holder.firstElementChild;
+    try {
+      const els = [...svg.querySelectorAll('path, polygon, polyline, rect, circle, ellipse, line')]
+        .filter(el => !el.closest('defs, clipPath, mask, symbol, pattern, marker') && el.getTotalLength);
+      const lens = els.map(el => { try { return el.getTotalLength() || 0; } catch { return 0; } });
+      const total = lens.reduce((a, b) => a + b, 0);
+      if (!(total > 0)) throw new Error('No shapes or paths found in that SVG.');
+      const pieces = [];
+      els.forEach((el, i) => {
+        const L = lens[i];
+        if (!(L > 0)) return;
+        const n = Math.max(24, Math.ceil(6000 * L / total));
+        const stepLen = L / n;
+        const m = el.getCTM();
+        let cur = [], prev = null;
+        for (let s = 0; s <= n; s++) {
+          const p = el.getPointAtLength(Math.min(L, s * stepLen));
+          if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) > 2 * stepLen + 1e-9) {
+            if (cur.length > 2) pieces.push(cur);
+            cur = [];
+          }
+          const q = m ? p.matrixTransform(m) : p;
+          cur.push([q.x, q.y]);
+          prev = p;
+        }
+        if (cur.length > 2) pieces.push(cur);
+      });
+      return pieces;
+    } finally {
+      holder.replaceChildren();
+    }
+  }
+
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image file.')); };
+      img.src = url;
+    });
+  }
+
+  function rasterize(img) {
+    const MAXD = 320; // tracing resolution; plenty for a 1024-point outline
+    const s = Math.min(1, MAXD / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * s)), h = Math.max(1, Math.round(img.naturalHeight * s));
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    const data = g.getImageData(0, 0, w, h).data;
+    // Use transparency to find the shape if the image has a real transparent background.
+    let clear = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] < 250) clear++;
+    const useAlpha = clear > 0.02 * w * h;
+    return { data, w, h, useAlpha, thr: useAlpha ? 128 : otsu(data) };
+  }
+
+  // Otsu's method: the brightness cutoff that best splits the image into two groups.
+  function otsu(data) {
+    const hist = new Float64Array(256);
+    for (let i = 0; i < data.length; i += 4) hist[lum(data, i) | 0]++;
+    const total = data.length / 4;
+    let sumAll = 0;
+    for (let i = 0; i < 256; i++) sumAll += i * hist[i];
+    let wB = 0, sumB = 0, best = 0, thr = 128;
+    for (let i = 0; i < 256; i++) {
+      wB += hist[i];
+      if (!wB) continue;
+      const wF = total - wB;
+      if (!wF) break;
+      sumB += i * hist[i];
+      const mB = sumB / wB, mF = (sumAll - sumB) / wF;
+      const between = wB * wF * (mB - mF) ** 2;
+      if (between > best) { best = between; thr = i + 1; }
+    }
+    return Math.min(254, Math.max(1, thr));
+  }
+
+  // Brightness of a pixel as if drawn on white.
+  function lum(d, i) {
+    const a = d[i + 3] / 255;
+    return (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) * a + 255 * (1 - a);
+  }
+
+  // Traces the outlines of the shape in an image: builds a mask, collects every pixel edge
+  // between shape and background (oriented so the shape is on the right), then follows those
+  // edges into closed loops. Each loop is an outer outline or a hole.
+  function rasterPieces({ data, w, h, useAlpha }, thr) {
+    const mask = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++)
+      mask[i] = useAlpha ? data[4 * i + 3] >= thr : lum(data, 4 * i) < thr;
+    // The image border should be background; if it is mostly "shape", the colours are inverted.
+    let edge = 0, edgeOn = 0;
+    for (let x = 0; x < w; x++) { edgeOn += mask[x] + mask[(h - 1) * w + x]; edge += 2; }
+    for (let y = 0; y < h; y++) { edgeOn += mask[y * w] + mask[y * w + w - 1]; edge += 2; }
+    if (edgeOn > edge / 2) for (let i = 0; i < mask.length; i++) mask[i] ^= 1;
+
+    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && mask[y * w + x] === 1;
+    const W1 = w + 1;
+    const outA = new Int32Array(W1 * (h + 1)).fill(-1), outB = new Int32Array(W1 * (h + 1)).fill(-1);
+    const eFrom = [], eTo = [], eDir = []; // dir: 0 east, 1 south, 2 west, 3 north (screen)
+    const add = (x0, y0, x1, y1, d) => {
+      const from = y0 * W1 + x0, idx = eFrom.length;
+      eFrom.push(from); eTo.push(y1 * W1 + x1); eDir.push(d);
+      if (outA[from] < 0) outA[from] = idx; else outB[from] = idx;
+    };
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!on(x, y)) continue;
+      if (!on(x, y - 1)) add(x, y, x + 1, y, 0);
+      if (!on(x + 1, y)) add(x + 1, y, x + 1, y + 1, 1);
+      if (!on(x, y + 1)) add(x + 1, y + 1, x, y + 1, 2);
+      if (!on(x - 1, y)) add(x, y + 1, x, y, 3);
+    }
+    if (!eFrom.length) throw new Error('No shape found — try moving the threshold slider.');
+
+    const used = new Uint8Array(eFrom.length);
+    const loops = [];
+    for (let e0 = 0; e0 < eFrom.length; e0++) {
+      if (used[e0]) continue;
+      const loop = [];
+      let e = e0;
+      while (e >= 0) {
+        used[e] = 1;
+        loop.push([eFrom[e] % W1, Math.floor(eFrom[e] / W1)]);
+        const v = eTo[e];
+        const a = outA[v] >= 0 && !used[outA[v]] ? outA[v] : -1;
+        const b = outB[v] >= 0 && !used[outB[v]] ? outB[v] : -1;
+        // Where two pixels touch only at a corner, turn right so their outlines stay apart.
+        e = a >= 0 && b >= 0 ? (eDir[b] === (eDir[e] + 1) % 4 ? b : a) : Math.max(a, b);
+      }
+      if (loop.length >= 12) loops.push(smoothLoop(loop, 2));
+    }
+    return loops;
+  }
+
+  // Moving average around a closed loop, to soften the pixel staircase.
+  function smoothLoop(pts, r) {
+    const n = pts.length;
+    return pts.map((_, i) => {
+      let x = 0, y = 0;
+      for (let k = -r; k <= r; k++) { const p = pts[(i + k + n) % n]; x += p[0]; y += p[1]; }
+      return [x / (2 * r + 1), y / (2 * r + 1)];
+    });
+  }
+
+  function processUpload() {
+    if (!upload) return;
+    try {
+      const pieces = upload.kind === 'svg' ? svgPieces(upload.text) : rasterPieces(upload.raster, +ui.thr.value);
+      const { loop, used, found } = joinPieces(pieces, ui.join.checked);
+      setShape({ pts: normalize(resampleLoop(loop, UPLOAD_POINTS), true), phase: 0, strokeW: 0.3, K: UPLOAD_K });
+      let opt = ui.shape.querySelector('option[value=upload]');
+      if (!opt) { opt = document.createElement('option'); opt.value = 'upload'; ui.shape.append(opt); }
+      opt.textContent = `Uploaded: ${upload.name}`;
+      ui.shape.value = 'upload';
+      showUploadOpts();
+      const desc = found === 1 ? '1 outline found'
+        : `${found} outlines found, ` + (ui.join.checked ? `${used} joined` : 'drawing the largest');
+      setStatus(`${upload.name}: ${desc}`);
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  }
+
+  function showUploadOpts() {
+    const isUpload = ui.shape.value === 'upload';
+    ui.uploadOpts.hidden = !isUpload;
+    ui.thrLabel.hidden = !isUpload || upload?.kind !== 'raster';
+  }
+
+  ui.upload.onclick = () => ui.file.click();
+  ui.file.onchange = async () => {
+    const f = ui.file.files[0];
+    ui.file.value = '';
+    if (!f) return;
+    try {
+      if (f.type === 'image/svg+xml' || /\.svg$/i.test(f.name)) {
+        upload = { kind: 'svg', name: f.name, text: await f.text() };
+      } else {
+        const raster = rasterize(await loadImage(f));
+        upload = { kind: 'raster', name: f.name, raster };
+        ui.thr.value = raster.thr;
+        ui.thrOut.textContent = raster.thr;
+      }
+      processUpload();
+      resetView();
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  };
+  ui.join.onchange = processUpload;
+  ui.thr.oninput = () => { ui.thrOut.textContent = ui.thr.value; };
+  ui.thr.onchange = processUpload;
+
+  // ---------- Controls ----------
+  const togglePlay = () => { playing = !playing; ui.play.textContent = playing ? 'Pause' : 'Play'; };
+  ui.play.onclick = togglePlay;
+  // Entering either mode starts again from N = 1.
+  $('animShape').onclick = e => {
+    mode = mode === 'shape' ? 'trace' : 'shape';
+    e.currentTarget.setAttribute('aria-pressed', mode === 'shape');
+    layout = null; // the two modes lay the canvas out differently
+    resetView();
+    restart();
+    playing = true;
+    ui.play.textContent = 'Pause';
+  };
+  $('singleChain').onclick = e => {
+    chains = chains === 'single' ? 'xy' : 'single';
+    e.currentTarget.setAttribute('aria-pressed', chains === 'single');
+    layout = null; // single chain doesn't need room for side chains
+    resetView();
+  };
+  canvas.addEventListener('click', e => { if (e.button === 0) togglePlay(); });
+  // Space toggles too — except in the series popup, or where Space already does something
+  // (dropdowns, checkboxes). On buttons it is intercepted so it doesn't also click them.
+  const spaceIsOurs = e => e.code === 'Space' && !document.querySelector('dialog[open]') &&
+    !e.target.matches('select, input[type=checkbox]');
+  window.addEventListener('keydown', e => {
+    if (!spaceIsOurs(e)) return;
+    e.preventDefault();
+    if (!e.repeat) togglePlay();
+  });
+  window.addEventListener('keyup', e => { if (spaceIsOurs(e)) e.preventDefault(); });
+  ui.restart.onclick = () => { restart(); playing = true; ui.play.textContent = 'Pause'; };
+  ui.shape.onchange = () => {
+    if (ui.shape.value === 'upload') processUpload();
+    else setShape(BUILTIN[ui.shape.value]());
+    showUploadOpts();
+    resetView();
+  };
+  $('resetView').onclick = resetView;
+  function setFollow(on) {
+    follow = on;
+    $('followTip').setAttribute('aria-pressed', on);
+  }
+  $('followTip').onclick = () => setFollow(!follow);
+
+  // ---------- Zoom (wheel) and pan (middle-button drag) ----------
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    const scale = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1; // lines / pages → pixels
+    const zoom = Math.min(2000, Math.max(0.2, view.zoom * Math.exp(-e.deltaY * scale * 0.0015)));
+    // Keep the point under the cursor fixed.
+    view.panX = mx - (mx - view.panX) * zoom / view.zoom;
+    view.panY = my - (my - view.panY) * zoom / view.zoom;
+    view.zoom = zoom;
+  }, { passive: false });
+
+  let drag = null;
+  canvas.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); }); // no autoscroll
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('panning');
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    setFollow(false); // panning by hand means the user wants to look elsewhere
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    view.panX += e.clientX - drag.x;
+    view.panY += e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+  });
+  const endDrag = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    canvas.classList.remove('panning');
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  ui.nSlider.oninput = () => { auto = false; setN(+ui.nSlider.value); };
+  // Speed 0.01× – 1× on a logarithmic slider so the slow end is easy to set.
+  ui.speed.oninput = () => { speed = 0.01 * 100 ** (ui.speed.value / 200); ui.speedOut.textContent = speed.toFixed(2) + '×'; };
+  window.addEventListener('resize', resize);
+
+  // ---------- Popups (series and help) ----------
+  // Both pause the animation while open and put it back the way it was on close.
+  const dlg = $('seriesDlg'), helpDlg = $('helpDlg');
+  let wasPlaying = false;
+
+  function openModal(d) {
+    wasPlaying = playing;
+    playing = false;
+    ui.play.textContent = 'Play';
+    d.showModal();
+  }
+
+  for (const d of [dlg, helpDlg]) {
+    d.addEventListener('click', e => { if (e.target === d) d.close(); }); // backdrop click
+    d.addEventListener('close', () => {
+      playing = wasPlaying;
+      ui.play.textContent = playing ? 'Pause' : 'Play';
+      last = performance.now();
+    });
+  }
+
+  // Coefficient of r cos(kt + φ) written as a cos kt + b sin kt.
+  function term(s, k) {
+    const a = s.r[k] * Math.cos(s.phi[k]);
+    const b = -s.r[k] * Math.sin(s.phi[k]);
+    const parts = [];
+    const fmt = (c, fn) => `${c < 0 ? '−' : '+'} ${Math.abs(c).toFixed(5)} ${fn} ${k === 1 ? '' : k}t`;
+    if (Math.abs(a) > 1e-9) parts.push(fmt(a, 'cos'));
+    if (Math.abs(b) > 1e-9) parts.push(fmt(b, 'sin'));
+    return parts.length ? parts.join('  ') : '0';
+  }
+
+  function openSeries() {
+    const count = Math.floor((N - 1) / step) + 1;
+    $('seriesTitle').textContent = `Fourier series for N = ${N} (${count} terms per axis)`;
+    const ks = step === 2 ? `k = 1, 3, 5, … ${N} &nbsp;·&nbsp; even k are all zero` : `k = 1, 2, 3, … ${N}`;
+    $('seriesFormula').innerHTML =
+      `<div><span class="x">x(t)</span> = ${sx.mean.toFixed(5)} + Σ (a<sub>k</sub> cos kt + b<sub>k</sub> sin kt)</div>` +
+      `<div><span class="y">y(t)</span> = ${sy.mean.toFixed(5)} + Σ (c<sub>k</sub> cos kt + d<sub>k</sub> sin kt)</div>` +
+      `<div>${ks} &nbsp;·&nbsp; 0 ≤ t &lt; 2π</div>`;
+    const rows = [];
+    for (let k = 1; k <= N; k += step)
+      rows.push(`<tr><td class="k">${k}</td><td>${term(sx, k)}</td><td>${term(sy, k)}</td></tr>`);
+    $('seriesRows').innerHTML = rows.join('');
+    dlg.querySelector('.dlg-body').scrollTop = 0;
+    openModal(dlg);
+  }
+
+  ui.showSeries.onclick = openSeries;
+  $('closeSeries').onclick = () => dlg.close();
+
+  // Help: section menu jumps within the scrolling body and highlights the section in view.
+  const helpBody = $('helpBody');
+  const navLinks = [...helpDlg.querySelectorAll('.help-nav a')];
+  $('help').onclick = () => { openModal(helpDlg); markSection(); };
+  $('closeHelp').onclick = () => helpDlg.close();
+  helpDlg.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#h-"]');
+    if (!a) return;
+    e.preventDefault(); // stay inside the dialog; don't change the page URL
+    helpDlg.querySelector(a.getAttribute('href')).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  function markSection() {
+    const top = helpBody.getBoundingClientRect().top;
+    let current = navLinks[0];
+    for (const a of navLinks)
+      if (helpDlg.querySelector(a.getAttribute('href')).getBoundingClientRect().top - top < 80) current = a;
+    if (helpBody.scrollTop + helpBody.clientHeight >= helpBody.scrollHeight - 2) current = navLinks[navLinks.length - 1];
+    navLinks.forEach(a => a.classList.toggle('active', a === current));
+  }
+  helpBody.addEventListener('scroll', markSection, { passive: true });
+
+  // Help figure: a square wave and its 1-, 3- and 10-term sine series.
+  (function drawSquareWaveFigure() {
+    const svg = $('sqFig'), W = 640, H = 190, mid = H / 2, amp = 60, NS = 'http://www.w3.org/2000/svg';
+    const X = u => 20 + (W - 40) * u / (2 * TAU); // two periods across
+    const path = (d, color, extra = {}) => {
+      const p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', d); p.setAttribute('fill', 'none'); p.setAttribute('stroke', color);
+      p.setAttribute('stroke-width', 2);
+      for (const k in extra) p.setAttribute(k, extra[k]);
+      svg.append(p);
+    };
+    path(`M${X(0)} ${mid} L${X(0)} ${mid - amp} L${X(Math.PI)} ${mid - amp} L${X(Math.PI)} ${mid + amp} ` +
+      `L${X(TAU)} ${mid + amp} L${X(TAU)} ${mid - amp} L${X(3 * Math.PI)} ${mid - amp} L${X(3 * Math.PI)} ${mid + amp} ` +
+      `L${X(2 * TAU)} ${mid + amp} L${X(2 * TAU)} ${mid}`, COL.muted, { 'stroke-dasharray': '5 5', 'stroke-width': 1.5 });
+    for (const [terms, color] of [[1, COL.xArm], [3, COL.yArm], [10, COL.accent]]) {
+      let d = '';
+      for (let i = 0; i <= 600; i++) {
+        const u = 2 * TAU * i / 600;
+        let v = 0;
+        for (let j = 0; j < terms; j++) { const k = 2 * j + 1; v += Math.sin(k * u) / k; }
+        d += `${i ? 'L' : 'M'}${X(u).toFixed(1)} ${(mid - amp * 4 / Math.PI * v).toFixed(1)}`;
+      }
+      path(d, color);
+    }
+  })();
+
+  resize();
+  setShape(BUILTIN.moore4());
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
